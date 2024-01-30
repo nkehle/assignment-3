@@ -24,7 +24,7 @@
     [(list '+ l r) (plusC (parse l) (parse r))]
     [(list '* l r) (multC (parse l) (parse r))]
     [(? symbol? s) (idC s)]
-    [(list (? symbol? s) e) (appC s (parse e))]
+    [(list (? symbol? s) e) (appC s (parse e))] ;; Q?
     [other (error 'parse "Syntax error in ~e" other)]))
 
 ;; Parse Tests
@@ -72,6 +72,6 @@
 (check-equal? (interp (parse '{+ 2 3})) 5)
 (check-equal? (interp (parse '{* {+ 2 3} 4})) 20)
 (check-exn #rx"Logic Error" (lambda() (interp (parse 'a)))) 
-;;(check-equal? (interp (parse '{f 12})) )
+;;(check-equal? (interp (parse '{f 12})) ) {+ 2}
 
 
