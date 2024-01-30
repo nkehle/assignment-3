@@ -38,12 +38,21 @@
 
 ;; INTERP FUNCTIONS
 ;;-----------------------------------------------------------------------
-;; Interprets the given expression for the Arith language
+
+;; Inteprets the function named main from the func definitons
+(define (interp-fns (funs : (Listof FundefC))) : Real
+  0)
+
+;; Interp-fns Tests TODO
+
+;;-----------------------------------------------------------------------
+
+;; Inteprets the given expression using list of funs to resolve appC's
 (define (interp [a : ExprC]) : Number
   (match a
     [(numC n) n]
-    [(idC a) 'a]
-    [(appC f arg) ...] ;; TODO
+    [(idC s) (error 'interp "Logic Error: Interp of an idC: ~e" s)]
+    #;[(appC f arg) ...] ;; TODO
     [(plusC l r) (+ (interp l) (interp r))]
     [(multC l r) (* (interp l) (interp r))]))
 
@@ -51,6 +60,8 @@
 (check-equal? (interp (numC 5)) 5)
 (check-equal? (interp (plusC (numC 3) (numC 2))) 5)
 (check-equal? (interp (plusC (multC (numC 2) (numC 3)) (numC 4))) 10)
+
+;;-----------------------------------------------------------------------
 
 ;; Takes a Sexp and runs the interp and parse functions on the input
 (define(top-interp [code : Sexp]) : Number
@@ -60,7 +71,7 @@
 (check-equal? (interp (parse 5)) 5)
 (check-equal? (interp (parse '{+ 2 3})) 5)
 (check-equal? (interp (parse '{* {+ 2 3} 4})) 20)
-(check-equal? (interp (parse 'a)) 'a)
+(check-exn #rx"Logic Error" (lambda() (interp (parse 'a)))) 
 ;;(check-equal? (interp (parse '{f 12})) )
 
 
