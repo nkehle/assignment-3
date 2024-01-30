@@ -3,49 +3,64 @@
 
 ;; OAZO Data Definitions
 ;;-----------------------------------------------------------------------
-(struct numC ([n : Number]) #:transparent)
-(struct plusC ([l : ExprC] [r : ExprC])#:transparent)
-(struct multC ([l : ExprC] [r : ExprC])#:transparent)
-(struct squareC ([a : ExprC])#:transparent)
-(define-type ExprC (U numC plusC multC squareC))
+(struct numC ([n : Number])              #:transparent)
+(struct plusC ([l : ExprC] [r : ExprC])  #:transparent)
+(struct multC ([l : ExprC] [r : ExprC])  #:transparent)
+(struct idC ([s : Symbol])               #:transparent)
+(struct appC ([s : Symbol] [arg : ExprC])#:transparent)
+(define-type ExprC (U numC plusC multC idC appC))
+
+#;(define-type FunDefC
+  [fdC (name : symbol) (arg : symbol) (body : ExprC)])
 
 
-;; PARSER
+;; PARSE FUNCTIONS 
 ;;-----------------------------------------------------------------------
-;; Takes in a Sexp of concrete syntax and outputs the AST for the arith lang
-(define (parse [code : ExprC]) : ExprC
+;; Takes in a Sexp of concrete syntax and outputs the AST for the OAZO language
+;; should only be in the form of the above defined data types
+(define (parse [code : Sexp]) : ExprC
   (match code
     [(? real? n) (numC n)]
     [(list '+ l r) (plusC (parse l) (parse r))]
     [(list '* l r) (multC (parse l) (parse r))]
+    [(? symbol? s) (idC s)]
+    [(list (? symbol? s) e) (appC s (parse e))]
     [other (error 'parse "Syntax error in ~e" other)]))
 
-;; TESTS
+;; Parse Tests
 (check-equal? (parse 5) (numC 5))
 (check-equal? (parse '{+ 2 3}) (plusC (numC 2) (numC 3)))
 (check-equal? (parse '{* {+ 2 3} 4}) (multC (plusC (numC 2) (numC 3)) (numC 4)))
-(check-exn #rx"Syntax error" (lambda() (parse '{+ 2})))
+(check-equal? (parse 'a) (idC 'a))
+(check-equal? (parse '{f {* 2 1}}) (appC 'f (multC (numC 2) (numC 1))))
+;;(check-exn #rx"Syntax error" (lambda() (parse '{+ 2}))) ;; TODO
 
 
-;; INTERPRETER
+;; INTERP FUNCTIONS
 ;;-----------------------------------------------------------------------
 ;; Interprets the given expression for the Arith language
 (define (interp [a : ExprC]) : Number
   (match a
     [(numC n) n]
+    [(idC a) 'a]
+    [(appC f arg) ...] ;; TODO
     [(plusC l r) (+ (interp l) (interp r))]
-    [(multC l r) (* (interp l) (interp r))]
-    [(squareC a) (expt (interp a) 2)]))
+    [(multC l r) (* (interp l) (interp r))]))
 
-;; TESTS
+;; Interp Tests
 (check-equal? (interp (numC 5)) 5)
 (check-equal? (interp (plusC (numC 3) (numC 2))) 5)
 (check-equal? (interp (plusC (multC (numC 2) (numC 3)) (numC 4))) 10)
-(check-equal? (interp (squareC (numC 2))) 4)
-(check-equal? (interp (squareC (numC 0))) 0)
 
-
-;; top-interp
-;; accepts an Sexp and calls the parse and interp
+;; Takes a Sexp and runs the interp and parse functions on the input
 (define(top-interp [code : Sexp]) : Number
   (interp (parse code)))
+
+;; Top-Interp Tests
+(check-equal? (interp (parse 5)) 5)
+(check-equal? (interp (parse '{+ 2 3})) 5)
+(check-equal? (interp (parse '{* {+ 2 3} 4})) 20)
+(check-equal? (interp (parse 'a)) 'a)
+;;(check-equal? (interp (parse '{f 12})) )
+
+
