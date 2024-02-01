@@ -3,6 +3,8 @@
 
 ;; OAZO Data Definitions
 ;;-----------------------------------------------------------------------
+
+;; Expr
 (struct numC ([n : Number])              #:transparent)
 (struct plusC ([l : ExprC] [r : ExprC])  #:transparent)
 (struct multC ([l : ExprC] [r : ExprC])  #:transparent)
@@ -10,8 +12,9 @@
 (struct appC ([s : Symbol] [arg : ExprC])#:transparent)
 (define-type ExprC (U numC plusC multC idC appC))
 
-#;(define-type FunDefC
-  [fdC (name : symbol) (arg : symbol) (body : ExprC)])
+;; Defn
+(struct fdC ([name : idC] [arg : idC] [body : ExprC]) #:transparent)
+(define-type FunDefC fdC)
 
 
 ;; PARSE FUNCTIONS 
@@ -24,7 +27,7 @@
     [(list '+ l r) (plusC (parse l) (parse r))]
     [(list '* l r) (multC (parse l) (parse r))]
     [(? symbol? s) (idC s)]
-    [(list (? symbol? s) e) (appC s (parse e))] ;; Q?
+    [(list (? symbol? s) expr) (appC s (parse expr))] ;; TODO with match helper
     [other (error 'parse "Syntax error in ~e" other)]))
 
 ;; Parse Tests
@@ -32,15 +35,27 @@
 (check-equal? (parse '{+ 2 3}) (plusC (numC 2) (numC 3)))
 (check-equal? (parse '{* {+ 2 3} 4}) (multC (plusC (numC 2) (numC 3)) (numC 4)))
 (check-equal? (parse 'a) (idC 'a))
+
 (check-equal? (parse '{f {* 2 1}}) (appC 'f (multC (numC 2) (numC 1))))
 ;;(check-exn #rx"Syntax error" (lambda() (parse '{+ 2}))) ;; TODO
+
+
+;; Takes in an Sexp and parses it into and AST for the OAZO language
+(define (parse-fundef [code : Sexp]) : FunDefC
+  (match code
+    [(list 'func (list (? symbol? name) (? symbol? arg)) ': body)
+     (fdC (idC name) (idC arg) (parse body))]
+    [else (error 'parse-func-def "Syntax error: ~e" code)]))
+
+;; Parse FunDef Tests
+(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC (idC 'f) (idC 'x) (plusC (idC 'x) (numC 14))))
 
 
 ;; INTERP FUNCTIONS
 ;;-----------------------------------------------------------------------
 
 ;; Inteprets the function named main from the func definitons
-(define (interp-fns (funs : (Listof FundefC))) : Real
+#;(define (interp-fns (funs : (Listof FundefC))) : Real
   0)
 
 ;; Interp-fns Tests TODO
