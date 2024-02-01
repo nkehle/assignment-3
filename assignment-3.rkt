@@ -19,6 +19,16 @@
 
 ;; PARSE FUNCTIONS 
 ;;-----------------------------------------------------------------------
+;; Helper to determine if the symbol is valid for an idC
+(define (symbol-valid [s : Symbol]) : Boolean
+  (match s
+    ['+ #f] ['- #f] ['* #f] ['/ #f] ['ifleq0? #f] ['else: #f] ['ifleq0? #f] [': #f]
+    [other #t]))
+
+; Helper Tests
+(check-equal? (symbol-valid '+) #f)
+(check-equal? (symbol-valid 'name) #t)
+
 ;; Takes in a Sexp of concrete syntax and outputs the AST for the OAZO language
 ;; should only be in the form of the above defined data types
 (define (parse [code : Sexp]) : ExprC
@@ -26,8 +36,8 @@
     [(? real? n) (numC n)]
     [(list '+ l r) (plusC (parse l) (parse r))]
     [(list '* l r) (multC (parse l) (parse r))]
-    [(? symbol? s) (idC s)]
-    [(list (? symbol? s) expr) (appC s (parse expr))] ;; TODO with match helper
+    [(and (? symbol? s) (? symbol-valid s)) (idC s)]
+    [(list (and (? symbol? s) (? symbol-valid s)) expr) (appC s (parse expr))]
     [other (error 'parse "Syntax error in ~e" other)]))
 
 ;; Parse Tests
@@ -35,10 +45,12 @@
 (check-equal? (parse '{+ 2 3}) (plusC (numC 2) (numC 3)))
 (check-equal? (parse '{* {+ 2 3} 4}) (multC (plusC (numC 2) (numC 3)) (numC 4)))
 (check-equal? (parse 'a) (idC 'a))
-
 (check-equal? (parse '{f {* 2 1}}) (appC 'f (multC (numC 2) (numC 1))))
-;;(check-exn #rx"Syntax error" (lambda() (parse '{+ 2}))) ;; TODO
+(check-exn #rx"Syntax error" (lambda() (parse '{* 2})))
+(check-exn #rx"Syntax error" (lambda() (parse '{+ 2 3 4})))
 
+
+;;-----------------------------------------------------------------------
 
 ;; Takes in an Sexp and parses it into and AST for the OAZO language
 (define (parse-fundef [code : Sexp]) : FunDefC
@@ -48,7 +60,8 @@
     [else (error 'parse-func-def "Syntax error: ~e" code)]))
 
 ;; Parse FunDef Tests
-(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC (idC 'f) (idC 'x) (plusC (idC 'x) (numC 14))))
+(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC (idC 'f) (idC 'x)
+                                                           (plusC (idC 'x) (numC 14))))
 
 
 ;; INTERP FUNCTIONS
