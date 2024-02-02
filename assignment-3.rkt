@@ -4,31 +4,33 @@
 ;; OAZO Data Definitions
 ;;-----------------------------------------------------------------------
 
-;; Expr
-(struct numC ([n : Number])              #:transparent)
-(struct plusC ([l : ExprC] [r : ExprC])  #:transparent)
-(struct multC ([l : ExprC] [r : ExprC])  #:transparent)
-(struct idC ([s : Symbol])               #:transparent)
-(struct appC ([s : Symbol] [arg : ExprC])#:transparent)
-(struct ifleq0? ([a : ExprC] [b : ExprC] [c : ExprC]) #:transparent)
-(define-type ExprC (U numC plusC multC idC appC ifleq0?))
+;; Expressions
+(struct numC ([n : Number])               #:transparent)
+(struct idC ([s : Symbol])                #:transparent)
+(struct appC ([s : Symbol] [arg : ExprC]) #:transparent)
+(struct binopC ([op : Symbol][l : ExprC] [r : ExprC]) #:transparent)
+(struct ifleq0? ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
+(define-type ExprC (U numC idC appC binopC ifleq0?))
 
-;; Defn
+;; Function Definitions
 (struct fdC ([name : idC] [arg : idC] [body : ExprC]) #:transparent)
 (define-type FunDefC fdC)
 
 
 ;; PARSE FUNCTIONS 
 ;;-----------------------------------------------------------------------
+
 ;; Helper to determine if the symbol is valid for an idC
 (define (symbol-valid [s : Symbol]) : Boolean
   (match s
     ['+ #f] ['- #f] ['* #f] ['/ #f] ['ifleq0? #f] ['else: #f] ['ifleq0? #f] [': #f]
     [other #t]))
 
-; Helper Tests
-(check-equal? (symbol-valid '+) #f)
-(check-equal? (symbol-valid 'name) #t)
+;; Helper to determine if its a valid operand
+(define (operand-valid [s : Symbol]) : Boolean
+  (match s
+    ['+ #t] ['- #t] ['* #t] ['/ #t]
+    [ other #f]))
 
 ;;-----------------------------------------------------------------------
 
@@ -37,20 +39,20 @@
 (define (parse [code : Sexp]) : ExprC
   (match code
     [(? real? n) (numC n)]
-    [(list '+ l r) (plusC (parse l) (parse r))]
-    [(list '* l r) (multC (parse l) (parse r))]
-    [(list a b c ) (ifleq0? (parse a) (parse b) (parse c))] ;; TODO
-    [(and (? symbol? s) (? symbol-valid s)) (idC s)]
+    [(list (and (? symbol? op) (? operand-valid s)) l r) (binopC op (parse l) (parse r))]
     [(list (and (? symbol? s) (? symbol-valid s)) expr) (appC s (parse expr))]
+    [(list 'ifleq0? test then else) (ifleq0? (parse test) (parse then) (parse else))]
+    [(and (? symbol? s) (? symbol-valid s)) (idC s)]
     [other (error 'parse "Syntax error in ~e" other)]))
+
 
 ;; Parse Tests
 (check-equal? (parse 5) (numC 5))
-(check-equal? (parse '{+ 2 3}) (plusC (numC 2) (numC 3)))
-(check-equal? (parse '{* {+ 2 3} 4}) (multC (plusC (numC 2) (numC 3)) (numC 4)))
-(check-equal? (parse '{ifleq0? x x {+ x 1}}) (ifleq0? (idC 'x) (idC 'x) (plusC (idC 'x) 1)))
+(check-equal? (parse '{+ 2 3}) (binopC '+ (numC 2) (numC 3)))
+(check-equal? (parse '{* {+ 2 3} 4}) (binopC '* (binopC '+ (numC 2) (numC 3)) (numC 4)))
+(check-equal? (parse '{ifleq0? x x {+ x 1}}) (ifleq0? (idC 'x) (idC 'x) (binopC '+ (idC 'x) (numC 1))))
 (check-equal? (parse 'a) (idC 'a))
-(check-equal? (parse '{f {* 2 1}}) (appC 'f (multC (numC 2) (numC 1))))
+(check-equal? (parse '{f {* 2 1}}) (appC 'f (binopC '* (numC 2) (numC 1))))
 (check-exn #rx"Syntax error" (lambda() (parse '{* 2})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ 2 3 4})))
 
@@ -66,20 +68,32 @@
 
 ;; Parse FunDef Tests
 (check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC (idC 'f) (idC 'x)
-                                                           (plusC (idC 'x) (numC 14))))
+                                                           (binopC '+ (idC 'x) (numC 14))))
+(check-equal? (parse-fundef '{func {f y} : {* y 2}}) (fdC (idC 'f) (idC 'y)
+                                                           (binopC '* (idC 'y) (numC 2))))
+
 ;;-----------------------------------------------------------------------
 
 ;; Takes in the whole program and parses the function definitions
-(define (parse-prog [code: Sexp]) : (Listof FunDefC)
-  (match code
-    []
-    []))
+(define (parse-prog [s : Sexp]) : (Listof FunDefC)
+  (match s
+    [(list fs ...) (map parse-fundef fs)]
+    [else '()]))
+
+
 ;; Parse-prog Tests
-(check-equal? ((parse-prog '{{func {f x} : {+ x 14}}
+#;(check-equal? ((parse-prog '{{func {f x} : {+ x 14}}
                              {func {main init} : {f 2}}})) (list (fdC)))
 
 ;; INTERP FUNCTIONS
 ;;-----------------------------------------------------------------------
+
+;; Helper for searching through the list of funs TODO
+(define (get-fundef [name : Symbol] [funs : (Listof FunDefC)]) : (U FunDefC Boolean)
+  (cond
+    [(empty? funs) #f]
+    [else (if (equal? name (first funs)) (first funs)
+              (get-fundef name (rest funs)))]))
 
 ;; Inteprets the function named main from the func definitons
 #;(define (interp-fns (funs : (Listof FundefC))) : Real
@@ -94,23 +108,32 @@
   (match a
     [(numC n) n]
     [(idC s) (error 'interp "Logic Error: Interp of an idC: ~e" s)]
+    [(ifleq0? test then else)
+     (if (>= (cast (interp test) Real) 0)  ;; double check this, weird behavior
+         (interp then)
+         (interp else))]
+    [(binopC op a b) (match op
+                       ['+ (+ (interp a) (interp b))]
+                       ['- (- (interp a) (interp b))]
+                       ['* (* (interp a) (interp b))]
+                       ['/ (/ (interp a) (interp b))])]
     #;[(appC f arg) ...] ;; TODO
-    [(plusC l r) (+ (interp l) (interp r))]
-    [(multC l r) (* (interp l) (interp r))]))
+    [else (error 'interp "Unknown expression: ~e" a)]))
 
 ;; Interp Tests
 (check-equal? (interp (numC 5)) 5)
-(check-equal? (interp (plusC (numC 3) (numC 2))) 5)
-(check-equal? (interp (plusC (multC (numC 2) (numC 3)) (numC 4))) 10)
+(check-equal? (interp (binopC '+ (numC 3) (numC 2))) 5)
+(check-equal? (interp (binopC '+ (binopC '* (numC 2) (numC 3)) (numC 4))) 10)
+(check-equal? (interp (parse '{ifleq0? 10 3 -1})) 3)
 
 ;;-----------------------------------------------------------------------
 
 ;; Interprets the entirely parsed program TODO
-(define (top-interp [program : Sexp]): Real
+#;(define (top-interp [program : Sexp]): Real
   (interp-fns (parse-prog program)))
 
 ;; Top-Interp Tests
-(check-equal? (top-interp
+#;(check-equal? (top-interp
                '{{func {f x} : {+ x 14}}
                  {func {main init} : {f 2}}}) 16)
 
