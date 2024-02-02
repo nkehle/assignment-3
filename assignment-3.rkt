@@ -5,10 +5,10 @@
 ;;-----------------------------------------------------------------------
 
 ;; Expressions
-(struct numC ([n : Number])               #:transparent)
+(struct numC ([n : Real])               #:transparent)
 (struct idC ([s : Symbol])                #:transparent)
 (struct appC ([s : Symbol] [arg : ExprC]) #:transparent)
-(struct binopC ([op : Symbol][l : ExprC] [r : ExprC]) #:transparent)
+(struct binopC ([op : Symbol][l : ExprC] [r : ExprC])          #:transparent)
 (struct ifleq0? ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (define-type ExprC (U numC idC appC binopC ifleq0?))
 
@@ -89,42 +89,69 @@
 ;;-----------------------------------------------------------------------
 
 ;; Helper for searching through the list of funs TODO
-(define (get-fundef [name : Symbol] [funs : (Listof FunDefC)]) : (U FunDefC Boolean)
+(define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
   (cond
-    [(empty? funs) #f]
-    [else (if (equal? name (first funs)) (first funs)
-              (get-fundef name (rest funs)))]))
+    [(empty? fds) (error 'get-fundef "reference to undefined function")]
+    [(cons? fds) (cond
+                   [(equal? n (fdC-name (first fds))) (first fds)]
+                   [else (get-fundef n (rest fds))])]))
+
+
+;; Helper for subsituting identifiers into expressions TODO
+(define (sub [what : ExprC] [for : Symbol] [in : ExprC]) : ExprC
+  (match in
+    [(numC n) in]
+    [(idC s) (if (equal? s for) what in)]
+    [(binopC op l r) (binopC op (sub what for l) (sub what for r))]
+    [(appC f a) (appC f (sub what for a))]
+    [(ifleq0? test then else) (ifleq0? (sub what for test)
+                                       (sub what for then)
+                                       (sub what for else))]
+    [else (error 'sub "Unknown expression: ~a" what)]))
+
+
+(check-equal? (sub (numC 5) 'x (idC 'x))
+              (numC 5))
+(check-equal? (sub (numC 5) 'x (binopC '+ (idC 'x) (numC 1)))
+              (binopC '+ (numC 5) (numC 1)))
+
 
 ;; Inteprets the function named main from the func definitons
 #;(define (interp-fns (funs : (Listof FundefC))) : Real
   0)
 
-;; Interp-fns Tests TODO
-
 ;;-----------------------------------------------------------------------
 
 ;; Inteprets the given expression using list of funs to resolve appC's
-(define (interp [a : ExprC]) : Number
+(define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
   (match a
     [(numC n) n]
     [(idC s) (error 'interp "Logic Error: Interp of an idC: ~e" s)]
     [(ifleq0? test then else)
-     (if (>= (cast (interp test) Real) 0)  ;; double check this, weird behavior
-         (interp then)
-         (interp else))]
+     (if (>= (cast (interp test fds) Real) 0)  ;; double check this, weird behavior
+         (interp then fds)
+         (interp else fds))]
     [(binopC op a b) (match op
-                       ['+ (+ (interp a) (interp b))]
-                       ['- (- (interp a) (interp b))]
-                       ['* (* (interp a) (interp b))]
-                       ['/ (/ (interp a) (interp b))])]
-    #;[(appC f arg) ...] ;; TODO
+                       ['+ (+ (interp a fds) (interp b fds))]
+                       ['- (- (interp a fds) (interp b fds))]
+                       ['* (* (interp a fds) (interp b fds))]
+                       ['/ (/ (interp a fds) (interp b fds))])]
+    
+    [(appC f a) (local ([define fd (get-fundef f fds)])
+                  (interp (sub a (fdC-arg fd) (fdC-body fd)) ;;???
+                      fds))]
+
     [else (error 'interp "Unknown expression: ~e" a)]))
 
 ;; Interp Tests
-(check-equal? (interp (numC 5)) 5)
-(check-equal? (interp (binopC '+ (numC 3) (numC 2))) 5)
-(check-equal? (interp (binopC '+ (binopC '* (numC 2) (numC 3)) (numC 4))) 10)
-(check-equal? (interp (parse '{ifleq0? 10 3 -1})) 3)
+(define fds(list (fdC (idC 'f) (idC 'x) (binopC '+ (idC 'x) (numC 1)))
+                 (fdC (idC 'g) (idC 'x) (binopC '* (idC 'x) (numC 2)))))
+
+(check-equal? (interp (numC 5) fds) 5)
+(check-equal? (interp (binopC '+ (numC 3) (numC 2)) fds) 5)
+(check-equal? (interp (binopC '+ (binopC '* (numC 2) (numC 3)) (numC 4)) fds) 10)
+(check-equal? (interp (parse '{ifleq0? 10 3 -1}) fds) 3)
+(displayln (interp (parse '{f 12}) fds))
 
 ;;-----------------------------------------------------------------------
 
