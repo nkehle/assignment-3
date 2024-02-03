@@ -13,7 +13,7 @@
 (define-type ExprC (U numC idC appC binopC ifleq0?))
 
 ;; Function Definitions
-(struct fdC ([name : idC] [arg : idC] [body : ExprC]) #:transparent)
+(struct fdC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
 (define-type FunDefC fdC)
 
 
@@ -43,7 +43,7 @@
     [(list (and (? symbol? s) (? symbol-valid s)) expr) (appC s (parse expr))]
     [(list 'ifleq0? test then else) (ifleq0? (parse test) (parse then) (parse else))]
     [(and (? symbol? s) (? symbol-valid s)) (idC s)]
-    [other (error 'parse "Syntax error in ~e" other)]))
+    [other (error 'parse "OAZO Syntax error in ~e" other)]))
 
 
 ;; Parse Tests
@@ -63,13 +63,13 @@
 (define (parse-fundef [code : Sexp]) : FunDefC
   (match code
     [(list 'func (list (? symbol? name) (? symbol? arg)) ': body)
-     (fdC (idC name) (idC arg) (parse body))]
-    [else (error 'parse-func-def "Syntax error: ~e" code)]))
+     (fdC name arg (parse body))]
+    [else (error 'parse-func-def "OAZO Syntax error: ~e" code)]))
 
 ;; Parse FunDef Tests
-(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC (idC 'f) (idC 'x)
+(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC 'f 'x
                                                            (binopC '+ (idC 'x) (numC 14))))
-(check-equal? (parse-fundef '{func {f y} : {* y 2}}) (fdC (idC 'f) (idC 'y)
+(check-equal? (parse-fundef '{func {f y} : {* y 2}}) (fdC 'f 'y
                                                            (binopC '* (idC 'y) (numC 2))))
 
 ;;-----------------------------------------------------------------------
@@ -77,13 +77,19 @@
 ;; Takes in the whole program and parses the function definitions
 (define (parse-prog [s : Sexp]) : (Listof FunDefC)
   (match s
-    [(list fs ...) (map parse-fundef fs)]
-    [else '()]))
+    ['() '()]
+    [(cons f r) (cons (parse-fundef f) (parse-prog r))] 
+    [other (error 'parse-prog "OAZO Syntax Error: Function with invalid syntax in ~e" other)]))
 
 
 ;; Parse-prog Tests
-#;(check-equal? ((parse-prog '{{func {f x} : {+ x 14}}
-                             {func {main init} : {f 2}}})) (list (fdC)))
+(check-equal? (parse-prog '{{func {f x} : {+ x 14}}
+                             {func {main init} : {f 2}}})
+              (list (fdC 'f 'x (binopC '+ (idC 'x) (numC 14)))
+                    (fdC 'main 'init (appC 'f (numC 2)))))
+
+(check-exn #rx"parse-func-def" (lambda() (parse-prog '{12 {func {main init} : {f 2}}})))
+             
 
 ;; INTERP FUNCTIONS
 ;;-----------------------------------------------------------------------
@@ -91,11 +97,12 @@
 ;; Helper for searching through the list of funs TODO
 (define (get-fundef [n : Symbol] [fds : (Listof FunDefC)]) : FunDefC
   (cond
-    [(empty? fds) (error 'get-fundef "reference to undefined function")]
+    [(empty? fds) (error 'get-fundef "OAZO Error: reference to undefined function")]
     [(cons? fds) (cond
                    [(equal? n (fdC-name (first fds))) (first fds)]
                    [else (get-fundef n (rest fds))])]))
 
+;;-----------------------------------------------------------------------
 
 ;; Helper for subsituting identifiers into expressions TODO
 (define (sub [what : ExprC] [for : Symbol] [in : ExprC]) : ExprC
@@ -107,7 +114,7 @@
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
                                        (sub what for else))]
-    [else (error 'sub "Unknown expression: ~a" what)]))
+    [else (error 'sub "OAZO Error: Unknown expression: ~a" what)]))
 
 
 (check-equal? (sub (numC 5) 'x (idC 'x))
@@ -116,17 +123,13 @@
               (binopC '+ (numC 5) (numC 1)))
 
 
-;; Inteprets the function named main from the func definitons
-#;(define (interp-fns (funs : (Listof FundefC))) : Real
-  0)
-
 ;;-----------------------------------------------------------------------
 
 ;; Inteprets the given expression using list of funs to resolve appC's
 (define (interp [a : ExprC] [fds : (Listof FunDefC)]) : Real
   (match a
     [(numC n) n]
-    [(idC s) (error 'interp "Logic Error: Interp of an idC: ~e" s)]
+    [(idC s) (error 'interp "OAZO Logic Error: Interp of an idC: ~e" s)]
     [(ifleq0? test then else)
      (if (>= (cast (interp test fds) Real) 0)  ;; double check this, weird behavior
          (interp then fds)
@@ -137,32 +140,46 @@
                        ['* (* (interp a fds) (interp b fds))]
                        ['/ (/ (interp a fds) (interp b fds))])]
     
-    [(appC f a) (local ([define fd (get-fundef f fds)])
-                  (interp (sub a (fdC-arg fd) (fdC-body fd)) ;;???
-                      fds))]
+    [(appC f a) (define fd (get-fundef f fds))
+                (interp (sub a
+                               (fdC-arg fd)
+                               (fdC-body fd))
+                        fds)]
 
-    [else (error 'interp "Unknown expression: ~e" a)]))
+    [else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))
 
 ;; Interp Tests
-(define fds(list (fdC (idC 'f) (idC 'x) (binopC '+ (idC 'x) (numC 1)))
-                 (fdC (idC 'g) (idC 'x) (binopC '* (idC 'x) (numC 2)))))
+(define fds(list (fdC 'f 'x (binopC '+ (idC 'x) (numC 1)))
+                 (fdC 'g 'x (binopC '* (idC 'x) (numC 2)))))
 
 (check-equal? (interp (numC 5) fds) 5)
 (check-equal? (interp (binopC '+ (numC 3) (numC 2)) fds) 5)
 (check-equal? (interp (binopC '+ (binopC '* (numC 2) (numC 3)) (numC 4)) fds) 10)
 (check-equal? (interp (parse '{ifleq0? 10 3 -1}) fds) 3)
-(displayln (interp (parse '{f 12}) fds))
+(check-equal? (interp (parse '{f 12}) fds) 13)
+
+;;-----------------------------------------------------------------------
+
+;; Inteprets the function named main from the func definitons
+(define (interp-fns [funs : (Listof FunDefC)]) : Real
+  (let ([main-fd (get-fundef 'main funs)])
+    (if main-fd
+        (interp (fdC-body main-fd) funs)
+        (error 'interp-fns "OAZO Error: 'main' function not found in function definitions"))))
 
 ;;-----------------------------------------------------------------------
 
 ;; Interprets the entirely parsed program TODO
-#;(define (top-interp [program : Sexp]): Real
+(define (top-interp [program : Sexp]): Real
   (interp-fns (parse-prog program)))
 
 ;; Top-Interp Tests
-#;(check-equal? (top-interp
+(check-equal? (top-interp
                '{{func {f x} : {+ x 14}}
                  {func {main init} : {f 2}}}) 16)
+(check-exn #rx"undefined" (lambda() (top-interp
+               '{{func {f x} : {+ x 14}}
+                 {func {g y} : {f 2}}})))
 
 
 
