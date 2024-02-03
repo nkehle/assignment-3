@@ -5,7 +5,7 @@
 ;;-----------------------------------------------------------------------
 
 ;; Expressions
-(struct numC ([n : Real])               #:transparent)
+(struct numC ([n : Real])                 #:transparent)
 (struct idC ([s : Symbol])                #:transparent)
 (struct appC ([s : Symbol] [arg : ExprC]) #:transparent)
 (struct binopC ([op : Symbol][l : ExprC] [r : ExprC])          #:transparent)
@@ -21,7 +21,7 @@
 ;; Helper to determine if the symbol is valid for an idC
 (define (symbol-valid [s : Symbol]) : Boolean
   (match s
-    [(or '+ '- '* '/ 'ifleq0? 'else: 'ifleq0? ':) #f]
+    [(or '+ '- '* '/ 'ifleq0? 'else: 'ifleq0? ': 'func) #f]
     [other #t]))
 
 ;; Helper to determine if its a valid operand
@@ -39,7 +39,9 @@
 (check-equal? (symbol-valid 'ifleq0?) #f)
 (check-equal? (symbol-valid 'else:) #f)
 (check-equal? (symbol-valid ':) #f)
+(check-equal? (symbol-valid 'func) #f)
 (check-equal? (symbol-valid 'x) #t)
+
 ;; Tests for operand-valid
 (check-equal? (operand-valid '+) #t)
 (check-equal? (operand-valid '-) #t)
@@ -52,11 +54,15 @@
 ;; should only be in the form of the above defined data types
 (define (parse [code : Sexp]) : ExprC
   (match code
-    [(? real? n) (numC n)]
-    [(list (and (? symbol? op) (? operand-valid s)) l r) (binopC op (parse l) (parse r))]
-    [(list (and (? symbol? s) (? symbol-valid s)) expr) (appC s (parse expr))]
-    [(list 'ifleq0? test then else) (ifleq0? (parse test) (parse then) (parse else))]
-    [(and (? symbol? s) (? symbol-valid s)) (idC s)]
+    [(? real? n) (numC n)]                               ;; numC
+    [(list (? real? n)) (numC n)]                        ;; numC in {12} form CHECCK  
+    [(list (and (? symbol? op) (? operand-valid s)) l r) ;; biopC
+     (binopC op (parse l) (parse r))]                    
+    [(list (and (? symbol? s) (? symbol-valid s)) expr)  ;; appC
+     (appC s (parse expr))]           
+    [(list 'ifleq0? test then else)                      ;; ifleq0?
+     (ifleq0? (parse test) (parse then) (parse else))]
+    [(and (? symbol? s) (? symbol-valid s)) (idC s)]  ;; idC 
     [other (error 'parse "OAZO Syntax error in ~e" other)]))
 
 
@@ -69,6 +75,7 @@
 (check-equal? (parse '{f {* 2 1}}) (appC 'f (binopC '* (numC 2) (numC 1))))
 (check-exn #rx"Syntax error" (lambda() (parse '{* 2})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ 2 3 4})))
+(check-exn #rx"Syntax error" (lambda() (parse '{+ func a})))
 
 
 ;;-----------------------------------------------------------------------
@@ -76,7 +83,8 @@
 ;; Takes in an Sexp and parses it into and AST for the OAZO language
 (define (parse-fundef [code : Sexp]) : fdC
   (match code
-    [(list 'func (list (? symbol? name) (? symbol? arg)) ': (? list? body))
+    [(list 'func (list (and (? symbol? name) (? symbol-valid name))
+                       (and (? symbol? arg) (? symbol-valid arg))) ': body)
      (fdC name arg (parse body))]
     [else (error 'parse-func-def "OAZO Syntax Error: ~e" code)]))
 
@@ -86,7 +94,11 @@
 (check-equal? (parse-fundef '{func {f y} : {* y 2}}) (fdC 'f 'y
                                                            (binopC '* (idC 'y) (numC 2))))
 
+(check-equal? (parse-fundef '{func {f x} : {6}}) (fdC 'f 'x
+                                                      (numC 6)))
+
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {+ x} : 12})))
+(check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {f +} : 12})))
 
 ;;-----------------------------------------------------------------------
 
@@ -163,10 +175,13 @@
                        ['+ (+ (interp a fds) (interp b fds))]
                        ['- (- (interp a fds) (interp b fds))]
                        ['* (* (interp a fds) (interp b fds))]
-                       ['/ (/ (interp a fds) (interp b fds))])]
+                       ['/ (let ([right-val (interp b fds)])
+                            (if (not (= right-val 0))
+                                (/ (interp a fds) right-val)
+                                (error 'interp "OAZO Arithmetic Error: Division by zero")))])]
     
     [(appC f a) (define fd (get-fundef f fds))
-                (interp (sub a
+                (interp (sub (numC (interp a fds))
                                (fdC-arg fd)
                                (fdC-body fd))
                         fds)]
@@ -187,6 +202,7 @@
 (check-equal? (interp (parse '{ifleq0? 10 3 -1}) fds) -1)
 (check-equal? (interp (parse '{ifleq0? -12 3 -1}) fds) 3)
 (check-equal? (interp (parse '{f 12}) fds) 13)
+(check-exn #rx"OAZO"(lambda() (interp (binopC '/ (numC 10) (numC 0)) fds)))
 
 ;;-----------------------------------------------------------------------
 
@@ -195,9 +211,6 @@
   (let ([main-fd (get-fundef 'main funs)])
     (define body (sub (numC 0) 'init (fdC-body main-fd)))
     (interp body funs)))
-    #;(if main-fd
-        (interp (fdC-body main-fd) funs)
-        (error 'interp-fns "OAZO Error: 'main' function not found in function definitions"))
 
 ;;-----------------------------------------------------------------------
 
@@ -209,20 +222,22 @@
 
 (check-equal? (top-interp
                '{{func {minus-five x} : {+ x {* -1 5}}}
-                {func {main init} : {minus-five {+ 8 init}}}}) 3)
+                 {func {main init} : {minus-five {+ 8 init}}}}) 3)
 
 (check-equal? (top-interp
                '{{func {minus-five x} : {+ x {* -1 5}}}
-                {func {main init} : {minus-five {+ 8 init}}}}) 3)
+                 {func {main init} : {minus-five {+ 8 init}}}}) 3)
 
 (check-equal? (top-interp
                '{{func {f x} : {+ x 14}}
                  {func {main init} : {f 2}}}) 16)
 
 (check-exn #rx"undefined" (lambda() (top-interp
-               '{{func {f x} : {+ x 14}}
-                 {func {g y} : {f 2}}})))
+                                     '{{func {f x} : {+ x 14}}
+                                       {func {g y} : {f 2}}})))
 
-
+(check-exn #rx"OAZO" (lambda() (top-interp
+                                '{{func {ignoreit x}: {+ 3 4}}
+                                  {func {main init} : {ignoreit {/ 1 {+ 0 0}}}}})))
 
 
