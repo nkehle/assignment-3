@@ -1,11 +1,12 @@
 #lang typed/racket
 (require typed/rackunit)
 
-;; Noa Kehle & Andrew Okerlund
 ;; Assignment 3
+;; Full Project Implemented
+
 
 ;; OAZO Data Definitions
-;;-----------------------------------------------------------------------
+;;-----------------------------------------------------------------------------------
 
 ;; Expressions
 (struct numC ([n : Real])                 #:transparent)
@@ -18,8 +19,9 @@
 ;; Function Definitions
 (struct fdC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
 
-;; PARSE FUNCTIONS 
-;;-----------------------------------------------------------------------
+
+;; PARSE HELPER FUNCTIONS
+;;-----------------------------------------------------------------------------------
 
 ;; Helper to determine if the symbol is valid for an idC
 (define (symbol-valid [s : Symbol]) : Boolean
@@ -51,7 +53,9 @@
 (check-equal? (operand-valid '*) #t)
 (check-equal? (operand-valid '/) #t)
 
-;;-----------------------------------------------------------------------
+
+;; PARSE
+;;-----------------------------------------------------------------------------------
 
 ;; Takes in a Sexp of concrete syntax and outputs the AST for the OAZO language
 ;; should only be in the form of the above defined data types
@@ -68,7 +72,6 @@
     [(and (? symbol? s) (? symbol-valid s)) (idC s)]  ;; idC 
     [other (error 'parse "OAZO Syntax error in ~e" other)]))
 
-
 ;; Parse Tests
 (check-equal? (parse 5) (numC 5))
 (check-equal? (parse '{+ 2 3}) (binopC '+ (numC 2) (numC 3)))
@@ -81,7 +84,8 @@
 (check-exn #rx"Syntax error" (lambda() (parse '{+ func a})))
 
 
-;;-----------------------------------------------------------------------
+;; PARSE-FUNDEF
+;;-----------------------------------------------------------------------------------
 
 ;; Takes in an Sexp and parses it into and function definition for the OAZO language
 (define (parse-fundef [code : Sexp]) : fdC
@@ -104,7 +108,9 @@
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {+ x} : 12})))
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {f +} : 12})))
 
-;;-----------------------------------------------------------------------
+
+;; PARSE-PROG 
+;;-----------------------------------------------------------------------------------
 
 ;; Takes in the whole program and parses the function definitions and outputs
 ;; the list of all fdC's
@@ -117,25 +123,24 @@
 
 ;; Parse-prog Tests
 (check-equal? (parse-prog '{{func {f x} : {+ x 14}}
-                             {func {main init} : {f 2}}})
+                            {func {main init} : {f 2}}})
+              
               (list (fdC 'f 'x (binopC '+ (idC 'x) (numC 14)))
                     (fdC 'main 'init (appC 'f (numC 2)))))
 (check-exn #rx"parse-func-def" (lambda() (parse-prog '{12 {func {main init} : {f 2}}})))
 (check-exn #rx"parse-prog" (lambda() (parse-prog '12)))
-             
 
-;; INTERP FUNCTIONS
-;;-----------------------------------------------------------------------
+
+;; INTERP HELPER FUNCTIONS
+;;-----------------------------------------------------------------------------------
 
 ;; Helper for searching through the list of funs TODO
 (define (get-fundef [n : Symbol] [fds : (Listof fdC)]) : fdC
   (cond
-    [(empty? fds) (error 'get-fundef "OAZO Error: reference to undefined function")]
+    [(empty? fds) (error 'get-fundef "OAZO Error: Reference to undefined function ~e" n)]
     [(cons? fds) (cond
                    [(equal? n (fdC-name (first fds))) (first fds)]
                    [else (get-fundef n (rest fds))])]))
-
-;;-----------------------------------------------------------------------
 
 ;; Helper for subsituting identifiers into expressions TODO
 (define (sub [what : ExprC] [for : Symbol] [in : ExprC]) : ExprC
@@ -147,7 +152,7 @@
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
                                        (sub what for else))]
-    #;[else (error 'sub "OAZO Error: Unknown expression: ~a" what)])) ;; Ask about these
+    #;[else (error 'sub "OAZO Error: Unknown expression: ~a" what)])) ;; this err occurs elsewhere
 
 
 ;; Sub Tests
@@ -165,7 +170,8 @@
               (ifleq0? (numC 5) (numC 10) (numC 20)))
 
 
-;;-----------------------------------------------------------------------
+;; INTERP
+;;-----------------------------------------------------------------------------------
 
 ;; Inteprets the given expression using list of funs to resolve appC's
 (define (interp [a : ExprC] [fds : (Listof fdC)]) : Real
@@ -191,12 +197,11 @@
                                (fdC-body fd))
                         fds)]
 
-    #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))   ;; ASK 
+    #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))   ;; this err occurs elsewhere
 
 ;; Interp Tests
 (define fds(list (fdC 'f 'x (binopC '+ (idC 'x) (numC 1)))
                  (fdC 'g 'x (binopC '* (idC 'x) (numC 2)))))
-
 (check-equal? (interp (numC 5) fds) 5)
 (check-exn #rx"Interp of an idC" (lambda () (interp (idC 'x) fds)))
 (check-equal? (interp (binopC '+ (numC 3) (numC 2)) fds) 5)
@@ -209,7 +214,9 @@
 (check-equal? (interp (parse '{f 12}) fds) 13)
 (check-exn #rx"OAZO"(lambda() (interp (binopC '/ (numC 10) (numC 0)) fds)))
 
-;;-----------------------------------------------------------------------
+
+;; INTERP-FNS
+;;-----------------------------------------------------------------------------------
 
 ;; Inteprets the function named main from the func definitons
 (define (interp-fns [funs : (Listof fdC)]) : Real
@@ -217,7 +224,9 @@
     (define body (sub (numC 0) 'init (fdC-body main-fd)))
     (interp body funs)))
 
-;;-----------------------------------------------------------------------
+
+;; TOP-INTERP
+;;-----------------------------------------------------------------------------------
 
 ;; Interprets the entirely parsed program TODO
 (define (top-interp [program : Sexp]): Real
@@ -235,6 +244,15 @@
 (check-equal? (top-interp
                '{{func {f x} : {+ x 14}}
                  {func {main init} : {f 2}}}) 16)
+
+(check-equal? (top-interp
+               '{{func {g x} : {ifleq0? x 0
+                                        {+ {g {- x 1}} x}}}
+                 {func {main init} : {g 3}}}) 6)
+
+
+(check-exn #rx"OAZO" (lambda() (top-interp
+               '12)))
 
 (check-exn #rx"undefined" (lambda() (top-interp
                                      '{{func {f x} : {+ x 14}}
