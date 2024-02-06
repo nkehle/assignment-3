@@ -1,6 +1,9 @@
 #lang typed/racket
 (require typed/rackunit)
 
+;; Noa Kehle & Andrew Okerlund
+;; Assignment 3
+
 ;; OAZO Data Definitions
 ;;-----------------------------------------------------------------------
 
@@ -27,7 +30,7 @@
 ;; Helper to determine if its a valid operand
 (define (operand-valid [s : Symbol]) : Boolean
   (match s
-    ['+ #t] ['- #t] ['* #t] ['/ #t]
+    [(or '+ '- '* '/) #t]
     [ other #f]))
 
 
@@ -55,7 +58,7 @@
 (define (parse [code : Sexp]) : ExprC
   (match code
     [(? real? n) (numC n)]                               ;; numC
-    [(list (? real? n)) (numC n)]                        ;; numC in {12} form CHECCK  
+    [(list (? real? n)) (numC n)]                        ;; numC in {12}
     [(list (and (? symbol? op) (? operand-valid s)) l r) ;; biopC
      (binopC op (parse l) (parse r))]                    
     [(list (and (? symbol? s) (? symbol-valid s)) expr)  ;; appC
@@ -80,7 +83,7 @@
 
 ;;-----------------------------------------------------------------------
 
-;; Takes in an Sexp and parses it into and AST for the OAZO language
+;; Takes in an Sexp and parses it into and function definition for the OAZO language
 (define (parse-fundef [code : Sexp]) : fdC
   (match code
     [(list 'func (list (and (? symbol? name) (? symbol-valid name))
@@ -89,20 +92,22 @@
     [else (error 'parse-func-def "OAZO Syntax Error: ~e" code)]))
 
 ;; Parse FunDef Tests
-(check-equal? (parse-fundef '{func {f x} : {+ x 14}}) (fdC 'f 'x
-                                                           (binopC '+ (idC 'x) (numC 14))))
-(check-equal? (parse-fundef '{func {f y} : {* y 2}}) (fdC 'f 'y
-                                                           (binopC '* (idC 'y) (numC 2))))
+(check-equal? (parse-fundef '{func {f x} : {+ x 14}})
+              (fdC 'f 'x (binopC '+ (idC 'x) (numC 14))))
 
-(check-equal? (parse-fundef '{func {f x} : {6}}) (fdC 'f 'x
-                                                      (numC 6)))
+(check-equal? (parse-fundef '{func {f y} : {* y 2}})
+              (fdC 'f 'y (binopC '* (idC 'y) (numC 2))))
+
+(check-equal? (parse-fundef '{func {f x} : {6}})
+              (fdC 'f 'x (numC 6)))
 
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {+ x} : 12})))
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {f +} : 12})))
 
 ;;-----------------------------------------------------------------------
 
-;; Takes in the whole program and parses the function definitions
+;; Takes in the whole program and parses the function definitions and outputs
+;; the list of all fdC's
 (define (parse-prog [s : Sexp]) : (Listof fdC)
   (match s
     ['() '()]
@@ -142,7 +147,7 @@
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
                                        (sub what for else))]
-    #;[else (error 'sub "OAZO Error: Unknown expression: ~a" what)]))
+    #;[else (error 'sub "OAZO Error: Unknown expression: ~a" what)])) ;; Ask about these
 
 
 ;; Sub Tests
@@ -186,7 +191,7 @@
                                (fdC-body fd))
                         fds)]
 
-    #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))
+    #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))   ;; ASK 
 
 ;; Interp Tests
 (define fds(list (fdC 'f 'x (binopC '+ (idC 'x) (numC 1)))
@@ -219,7 +224,6 @@
   (interp-fns (parse-prog program)))
 
 ;; Top-Interp Tests
-
 (check-equal? (top-interp
                '{{func {minus-five x} : {+ x {* -1 5}}}
                  {func {main init} : {minus-five {+ 8 init}}}}) 3)
