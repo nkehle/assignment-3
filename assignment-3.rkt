@@ -11,7 +11,7 @@
 ;; Expressions
 (struct numC ([n : Real])                 #:transparent)
 (struct idC ([s : Symbol])                #:transparent)
-(struct appC ([s : Symbol] [arg : ExprC]) #:transparent)
+(struct appC ([s : Symbol] [arg : (U (Listof ExprC) ExprC)]) #:transparent)
 (struct binopC ([op : Symbol][l : ExprC] [r : ExprC])          #:transparent)
 (struct ifleq0? ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (define-type ExprC (U numC idC appC binopC ifleq0?))
@@ -64,12 +64,14 @@
     [(? real? n) (numC n)]                               ;; numC
     [(list (? real? n)) (numC n)]                        ;; numC in {12}
     [(list (and (? symbol? op) (? operand-valid s)) l r) ;; biopC
-     (binopC op (parse l) (parse r))]                    
-    [(list (and (? symbol? s) (? symbol-valid s)) expr)  ;; appC
-     (appC s (parse expr))]           
+     (binopC s (parse l) (parse r))]
+    [(list (and (? symbol? s) (? symbol-valid s)) exp ...)  ;; appC
+     (appC s (map (lambda ([exp : Sexp])
+                    (parse exp))))]
+    
     [(list 'ifleq0? test then else)                      ;; ifleq0?
      (ifleq0? (parse test) (parse then) (parse else))]
-    [(and (? symbol? s) (? symbol-valid s)) (idC s)]  ;; idC 
+    [(and (? symbol? s) (? symbol-valid s)) (idC s)]     ;; idC 
     [other (error 'parse "OAZO Syntax error in ~e" other)]))
 
 ;; Parse Tests
@@ -82,6 +84,11 @@
 (check-exn #rx"Syntax error" (lambda() (parse '{* 2})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ 2 3 4})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ func a})))
+
+;; Parse Tests OAZO4
+(check-equal? (parse '{f {1 2 3}}) (appC 'f (list (numC 1) (numC 2)(numC 3))))
+;;(check-exn (lambda() parse '{f {}})
+
 
 
 ;; PARSE-FUNDEF
@@ -148,7 +155,7 @@
     [(numC n) in]
     [(idC s) (if (equal? s for) what in)]
     [(binopC op l r) (binopC op (sub what for l) (sub what for r))]
-    [(appC f a) (appC f (sub what for a))]
+    [(appC f a) (appC f (sub what for (cast a ExprC)))]
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
                                        (sub what for else))]
@@ -190,12 +197,13 @@
                             (if (not (= right-val 0))
                                 (/ (interp a fds) right-val)
                                 (error 'interp "OAZO Arithmetic Error: Division by zero")))])]
-    
+
     [(appC f a) (define fd (get-fundef f fds))
-                (interp (sub (numC (interp a fds))
+                (interp (sub (numC (interp (cast a ExprC) fds))
                                (fdC-arg fd)
                                (fdC-body fd))
                         fds)]
+    [(appC f (list ? ExprC? ...)) (error 'interp "TEST")]
 
     #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))   ;; this err occurs elsewhere
 
