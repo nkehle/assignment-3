@@ -11,7 +11,7 @@
 ;; Expressions
 (struct numC ([n : Real])                 #:transparent)
 (struct idC ([s : Symbol])                #:transparent)
-(struct appC ([s : Symbol] [arg : (U (Listof ExprC) ExprC)]) #:transparent)
+(struct appC ([s : Symbol] [arg : (Listof ExprC)]) #:transparent)
 (struct binopC ([op : Symbol][l : ExprC] [r : ExprC])          #:transparent)
 (struct ifleq0? ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (define-type ExprC (U numC idC appC binopC ifleq0?))
@@ -67,12 +67,13 @@
      (binopC s (parse l) (parse r))]
     [(list (and (? symbol? s) (? symbol-valid s)) exp ...)  ;; appC
      (appC s (map (lambda ([exp : Sexp])
-                    (parse exp))))]
+                (parse exp)) exp))]
     
     [(list 'ifleq0? test then else)                      ;; ifleq0?
      (ifleq0? (parse test) (parse then) (parse else))]
     [(and (? symbol? s) (? symbol-valid s)) (idC s)]     ;; idC 
     [other (error 'parse "OAZO Syntax error in ~e" other)]))
+
 
 ;; Parse Tests
 (check-equal? (parse 5) (numC 5))
@@ -80,13 +81,14 @@
 (check-equal? (parse '{* {+ 2 3} 4}) (binopC '* (binopC '+ (numC 2) (numC 3)) (numC 4)))
 (check-equal? (parse '{ifleq0? x x {+ x 1}}) (ifleq0? (idC 'x) (idC 'x) (binopC '+ (idC 'x) (numC 1))))
 (check-equal? (parse 'a) (idC 'a))
-(check-equal? (parse '{f {* 2 1}}) (appC 'f (binopC '* (numC 2) (numC 1))))
+(check-equal? (parse '{f {* 2 1}}) (appC 'f (list (binopC '* (numC 2) (numC 1)))))
 (check-exn #rx"Syntax error" (lambda() (parse '{* 2})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ 2 3 4})))
 (check-exn #rx"Syntax error" (lambda() (parse '{+ func a})))
 
 ;; Parse Tests OAZO4
 (check-equal? (parse '{f {1 2 3}}) (appC 'f (list (numC 1) (numC 2)(numC 3))))
+
 ;;(check-exn (lambda() parse '{f {}})
 
 
@@ -133,7 +135,8 @@
                             {func {main init} : {f 2}}})
               
               (list (fdC 'f 'x (binopC '+ (idC 'x) (numC 14)))
-                    (fdC 'main 'init (appC 'f (numC 2)))))
+                    (fdC 'main 'init (appC 'f (list (numC 2))))))
+
 (check-exn #rx"parse-func-def" (lambda() (parse-prog '{12 {func {main init} : {f 2}}})))
 (check-exn #rx"parse-prog" (lambda() (parse-prog '12)))
 
@@ -155,7 +158,11 @@
     [(numC n) in]
     [(idC s) (if (equal? s for) what in)]
     [(binopC op l r) (binopC op (sub what for l) (sub what for r))]
-    [(appC f a) (appC f (sub what for (cast a ExprC)))]
+    
+    [(appC f a) (appC f (map (lambda ([arg : ExprC])
+                                (sub what for arg))
+                              a))]
+    
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
                                        (sub what for else))]
@@ -171,8 +178,8 @@
               (idC 'x))
 (check-equal? (sub (numC 5) 'y (binopC '+ (idC 'x) (numC 1)))
               (binopC '+ (idC 'x) (numC 1)))
-(check-equal? (sub (numC 5) 'y (appC 'f (idC 'y)))
-              (appC 'f (numC 5)))
+(check-equal? (sub (numC 5) 'y (appC 'f (list (idC 'y))))
+              (appC 'f (list(numC 5))))
 (check-equal? (sub (numC 5) 'y (ifleq0? (idC 'y) (numC 10) (numC 20)))
               (ifleq0? (numC 5) (numC 10) (numC 20)))
 
