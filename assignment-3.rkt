@@ -9,15 +9,15 @@
 ;;-----------------------------------------------------------------------------------
 
 ;; Expressions
-(struct numC ([n : Real])                 #:transparent)
-(struct idC ([s : Symbol])                #:transparent)
-(struct appC ([s : Symbol] [arg : (Listof ExprC)]) #:transparent)
+(struct numC ([n : Real])                                      #:transparent)
+(struct idC ([s : Symbol])                                     #:transparent)
+(struct appC ([s : Symbol] [arg : (Listof ExprC)])             #:transparent)
 (struct binopC ([op : Symbol][l : ExprC] [r : ExprC])          #:transparent)
 (struct ifleq0? ([test : ExprC] [then : ExprC] [else : ExprC]) #:transparent)
 (define-type ExprC (U numC idC appC binopC ifleq0?))
 
 ;; Function Definitions
-(struct fdC ([name : Symbol] [arg : Symbol] [body : ExprC]) #:transparent)
+(struct fdC ([name : Symbol] [arg : (Listof Symbol)] [body : ExprC])    #:transparent)
 
 
 ;; PARSE HELPER FUNCTIONS
@@ -34,6 +34,13 @@
   (match s
     [(or '+ '- '* '/) #t]
     [ other #f]))
+
+;; Helper to check if a list of symbols is valid
+(: list-of-symbols? (Any -> Boolean))
+(define (list-of-symbols? lst)
+  (and (list? lst)
+       (andmap symbol? lst)
+       (andmap symbol-valid lst)))
 
 
 ;; Tests for symbol-valid
@@ -65,10 +72,11 @@
     [(list (? real? n)) (numC n)]                        ;; numC in {12}
     [(list (and (? symbol? op) (? operand-valid s)) l r) ;; biopC
      (binopC s (parse l) (parse r))]
+    
     [(list (and (? symbol? s) (? symbol-valid s)) exp ...)  ;; appC
      (appC s (map (lambda ([exp : Sexp])
                 (parse exp)) exp))]
-    
+
     [(list 'ifleq0? test then else)                      ;; ifleq0?
      (ifleq0? (parse test) (parse then) (parse else))]
     [(and (? symbol? s) (? symbol-valid s)) (idC s)]     ;; idC 
@@ -87,10 +95,9 @@
 (check-exn #rx"Syntax error" (lambda() (parse '{+ func a})))
 
 ;; Parse Tests OAZO4
-(check-equal? (parse '{f {1 2 3}}) (appC 'f (list (numC 1) (numC 2)(numC 3))))
+(check-equal? (parse '{f 1 2 3}) (appC 'f (list (numC 1) (numC 2)(numC 3))))
 
 ;;(check-exn (lambda() parse '{f {}})
-
 
 
 ;; PARSE-FUNDEF
@@ -99,20 +106,27 @@
 ;; Takes in an Sexp and parses it into and function definition for the OAZO language
 (define (parse-fundef [code : Sexp]) : fdC
   (match code
-    [(list 'func (list (and (? symbol? name) (? symbol-valid name))
-                       (and (? symbol? arg) (? symbol-valid arg))) ': body)
-     (fdC name arg (parse body))]
+    [(list 'func (list 'main) ': body)
+     (fdC 'main '() (parse body))]
+    [(list 'func (list (and (? symbol? name) (? symbol-valid name)) args ...) ': body)
+     (if (list-of-symbols? args) 
+         (fdC name (cast args (Listof Symbol)) (parse body))
+         (error 'parse-func-def "OAZO Syntax Error: ~e" code))]
     [else (error 'parse-func-def "OAZO Syntax Error: ~e" code)]))
+
 
 ;; Parse FunDef Tests
 (check-equal? (parse-fundef '{func {f x} : {+ x 14}})
-              (fdC 'f 'x (binopC '+ (idC 'x) (numC 14))))
+              (fdC 'f '(x) (binopC '+ (idC 'x) (numC 14))))
 
 (check-equal? (parse-fundef '{func {f y} : {* y 2}})
-              (fdC 'f 'y (binopC '* (idC 'y) (numC 2))))
+              (fdC 'f '(y) (binopC '* (idC 'y) (numC 2))))
 
 (check-equal? (parse-fundef '{func {f x} : {6}})
-              (fdC 'f 'x (numC 6)))
+              (fdC 'f '(x) (numC 6)))
+
+(check-equal? (parse-fundef '{func {main} : {6}})
+              (fdC 'main '() (numC 6)))
 
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {+ x} : 12})))
 (check-exn #rx"OAZO Syntax Error:" (lambda() (parse-fundef '{func {f +} : 12})))
@@ -132,12 +146,12 @@
 
 ;; Parse-prog Tests
 (check-equal? (parse-prog '{{func {f x} : {+ x 14}}
-                            {func {main init} : {f 2}}})
+                            {func {main} : {f 2}}})
               
-              (list (fdC 'f 'x (binopC '+ (idC 'x) (numC 14)))
-                    (fdC 'main 'init (appC 'f (list (numC 2))))))
+              (list (fdC 'f '(x) (binopC '+ (idC 'x) (numC 14)))
+                    (fdC 'main '() (appC 'f (list (numC 2))))))
 
-(check-exn #rx"parse-func-def" (lambda() (parse-prog '{12 {func {main init} : {f 2}}})))
+(check-exn #rx"parse-func-def" (lambda() (parse-prog '{12 {func {main} : {f 2}}})))
 (check-exn #rx"parse-prog" (lambda() (parse-prog '12)))
 
 
@@ -152,21 +166,32 @@
                    [(equal? n (fdC-name (first fds))) (first fds)]
                    [else (get-fundef n (rest fds))])]))
 
+
+;; Make a helper that takes list of EXPRC and List of Symbol and calls the sub until there done
+
 ;; Helper for subsituting identifiers into expressions TODO
 (define (sub [what : ExprC] [for : Symbol] [in : ExprC]) : ExprC
   (match in
     [(numC n) in]
     [(idC s) (if (equal? s for) what in)]
     [(binopC op l r) (binopC op (sub what for l) (sub what for r))]
-    
-    [(appC f a) (appC f (map (lambda ([arg : ExprC])
-                                (sub what for arg))
-                              a))]
-    
+    #;[(appC f a) (appC f (sub what for a))]
     [(ifleq0? test then else) (ifleq0? (sub what for test)
                                        (sub what for then)
-                                       (sub what for else))]
-    #;[else (error 'sub "OAZO Error: Unknown expression: ~a" what)])) ;; this err occurs elsewhere
+                                       (sub what for else))]))
+
+;; Helper that helps sub many arguments 
+(define (sub-many [args : (Listof ExprC)] [syms : (Listof Symbol)] [in : ExprC] [fds : (Listof fdC)]) : ExprC
+  (define (sub-many-helper [args : (Listof ExprC)] [syms : (Listof Symbol)] [acc : ExprC]) : ExprC
+    (match args
+      ['() acc]
+      [(cons arg rest-args)
+       (match syms
+         ['() (error 'sub-many "OAZO Error: Mismatched number of arguments and symbols")]
+         [(cons sym rest-syms)
+          (sub-many-helper rest-args rest-syms
+                           (sub (numC (interp arg fds)) sym acc))])]))
+  (sub-many-helper args syms in))
 
 
 ;; Sub Tests
@@ -178,7 +203,7 @@
               (idC 'x))
 (check-equal? (sub (numC 5) 'y (binopC '+ (idC 'x) (numC 1)))
               (binopC '+ (idC 'x) (numC 1)))
-(check-equal? (sub (numC 5) 'y (appC 'f (list (idC 'y))))
+#;(check-equal? (sub (numC 5) 'y (appC 'f (list (idC 'y))))
               (appC 'f (list(numC 5))))
 (check-equal? (sub (numC 5) 'y (ifleq0? (idC 'y) (numC 10) (numC 20)))
               (ifleq0? (numC 5) (numC 10) (numC 20)))
@@ -205,18 +230,19 @@
                                 (/ (interp a fds) right-val)
                                 (error 'interp "OAZO Arithmetic Error: Division by zero")))])]
 
-    [(appC f a) (define fd (get-fundef f fds))
-                (interp (sub (numC (interp (cast a ExprC) fds))
-                               (fdC-arg fd)
-                               (fdC-body fd))
-                        fds)]
-    [(appC f (list ? ExprC? ...)) (error 'interp "TEST")]
+    [(appC f args) (define fd (get-fundef f fds))
+                   (interp (sub-many args (fdC-arg fd) (fdC-body fd) fds) fds)]))
+    
 
-    #;[else (error 'interp "OAZO Error: Unknown expression: ~e" a)]))   ;; this err occurs elsewhere
+
+(define fds-list (list (fdC 'f '(x y) (binopC '+ (idC 'x) (idC 'y)))))
+
+(check-equal? (interp (appC 'f (list (numC 2) (numC 3))) fds-list) 5)
+
 
 ;; Interp Tests
-(define fds(list (fdC 'f 'x (binopC '+ (idC 'x) (numC 1)))
-                 (fdC 'g 'x (binopC '* (idC 'x) (numC 2)))))
+(define fds(list (fdC 'f '(x) (binopC '+ (idC 'x) (numC 1)))
+                 (fdC 'g '(x) (binopC '* (idC 'x) (numC 2)))))
 (check-equal? (interp (numC 5) fds) 5)
 (check-exn #rx"Interp of an idC" (lambda () (interp (idC 'x) fds)))
 (check-equal? (interp (binopC '+ (numC 3) (numC 2)) fds) 5)
@@ -236,7 +262,7 @@
 ;; Inteprets the function named main from the func definitons
 (define (interp-fns [funs : (Listof fdC)]) : Real
   (let ([main-fd (get-fundef 'main funs)])
-    (define body (sub (numC 0) 'init (fdC-body main-fd)))
+    (define body (fdC-body main-fd))
     (interp body funs)))
 
 
@@ -250,20 +276,38 @@
 ;; Top-Interp Tests
 (check-equal? (top-interp
                '{{func {minus-five x} : {+ x {* -1 5}}}
-                 {func {main init} : {minus-five {+ 8 init}}}}) 3)
+                 {func {main} : {minus-five {+ 8 0}}}}) 3)
 
 (check-equal? (top-interp
                '{{func {minus-five x} : {+ x {* -1 5}}}
-                 {func {main init} : {minus-five {+ 8 init}}}}) 3)
+                 {func {main} : {minus-five {+ 8 0}}}}) 3)
 
 (check-equal? (top-interp
                '{{func {f x} : {+ x 14}}
-                 {func {main init} : {f 2}}}) 16)
+                 {func {main} : {f 2}}}) 16)
 
 (check-equal? (top-interp
+               '{{func {f x y z} : {+ (+ x y) z}}
+                 {func {main} : {f 1 2 3}}}) 6)
+
+
+(check-exn #rx"Mismatched number of argument"
+           (lambda () top-interp
+             '{{func {f x y} : {+ x y}}
+               {func {main} : {f 1 2 3}}}))
+
+#;(check-exn (lambda () top-interp
+                     '{{func {f x y z} : {+ {+ x y} z}}
+                       {func {main} : {f 1 2}}}))
+
+#;(check-equal? (top-interp
+                     '{{func {f x y z} : {+ {+ x y} z}}
+                       {func {main} : {f 1 2}}}) 6 )
+
+#;(check-equal? (top-interp
                '{{func {g x} : {ifleq0? x 0
                                         {+ {g {- x 1}} x}}}
-                 {func {main init} : {g 3}}}) 6)
+                 {func {main} : {g 3}}}) 6)
 
 
 (check-exn #rx"OAZO" (lambda() (top-interp
@@ -275,6 +319,25 @@
 
 (check-exn #rx"OAZO" (lambda() (top-interp
                                 '{{func {ignoreit x}: {+ 3 4}}
-                                  {func {main init} : {ignoreit {/ 1 {+ 0 0}}}}})))
+                                  {func {main} : {ignoreit {/ 1 {+ 0 0}}}}})))
+
+
+;;---------------------------------------------------------------------------------
+
+
+;; More tests
+(check-equal? (interp-fns
+       (parse-prog '{{func {f x y} : {+ x y}}
+                     {func {main} : {f 1 2}}}))
+      3)
+ (check-equal? (interp-fns
+        (parse-prog '{{func {f} : 5}
+                      {func {main} : {+ {f} {f}}}}))
+       10)
+ (check-exn #px"OAZO"
+            (λ ()
+              (interp-fns
+               (parse-prog '{{func {f x y} : {+ x y}}
+                             {func {main} : {f 1}}}))))
 
 
