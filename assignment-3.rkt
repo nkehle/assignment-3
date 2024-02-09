@@ -21,7 +21,7 @@
 
 ;; TOP-INTERP
 ;;-----------------------------------------------------------------------------------
-;; Interprets the entirely parsed program TODO
+;; Interprets the entirely parsed program
 (define (top-interp [program : Sexp]): Real
   (interp-fns (parse-prog program)))
 
@@ -300,9 +300,9 @@
                                  '{{func {f x y z} : {+ {+ x y} z}}
                                    {func {main} : {f 1 2}}})))
 
-(check-exn #rx"OAZO" (lambda()
-                       (top-interp '{{func {f x y} : {+ × 2}}
-                                     {func {main} : {f 3}}})))
+(check-exn #rx"OAZO" (lambda()          ;; this one isnt passing in the submission tests
+                       (top-interp '{{func {f x y} : {+ × 2}}   
+                                     {func {main} : {f 3}}})))  
 
 (check-exn #rx"OAZO" (lambda()
                        (top-interp '{{func {f x y} : {+ × 2}}
